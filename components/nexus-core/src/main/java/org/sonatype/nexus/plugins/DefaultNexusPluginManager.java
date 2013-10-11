@@ -36,9 +36,11 @@ import org.sonatype.aether.version.Version;
 import org.sonatype.aether.version.VersionScheme;
 import org.sonatype.guice.bean.reflect.ClassSpace;
 import org.sonatype.guice.bean.reflect.URLClassSpace;
-import org.sonatype.guice.nexus.binders.NexusAnnotatedBeanModule;
+import org.sonatype.guice.plexus.binders.PlexusAnnotatedBeanModule;
 import org.sonatype.guice.plexus.binders.PlexusXmlBeanModule;
 import org.sonatype.guice.plexus.config.PlexusBeanModule;
+import org.sonatype.inject.BeanEntry;
+import org.sonatype.inject.Mediator;
 import org.sonatype.inject.Parameters;
 import org.sonatype.nexus.events.Event;
 import org.sonatype.nexus.guice.AbstractInterceptorModule;
@@ -53,6 +55,7 @@ import org.sonatype.nexus.plugins.rest.NexusResourceBundle;
 import org.sonatype.nexus.plugins.rest.StaticResource;
 import org.sonatype.nexus.proxy.registry.RepositoryTypeDescriptor;
 import org.sonatype.nexus.proxy.registry.RepositoryTypeRegistry;
+import org.sonatype.nexus.proxy.repository.Repository;
 import org.sonatype.nexus.util.AlphanumComparator;
 import org.sonatype.plugin.metadata.GAVCoordinate;
 import org.sonatype.plugins.model.ClasspathDependency;
@@ -87,8 +90,6 @@ public class DefaultNexusPluginManager
 
   private final EventBus eventBus;
 
-  private final RepositoryTypeRegistry repositoryTypeRegistry;
-
   private final MimeSupport mimeSupport;
 
   private final DefaultPlexusContainer container;
@@ -104,15 +105,13 @@ public class DefaultNexusPluginManager
   private final VersionScheme versionParser = new GenericVersionScheme();
 
   @Inject
-  public DefaultNexusPluginManager(final RepositoryTypeRegistry repositoryTypeRegistry,
-                                   final EventBus eventBus,
+  public DefaultNexusPluginManager(final EventBus eventBus,
                                    final PluginRepositoryManager repositoryManager,
                                    final DefaultPlexusContainer container,
                                    final MimeSupport mimeSupport,
                                    final @Parameters Map<String, String> variables,
                                    final List<AbstractInterceptorModule> interceptorModules)
   {
-    this.repositoryTypeRegistry = checkNotNull(repositoryTypeRegistry);
     this.eventBus = checkNotNull(eventBus);
     this.repositoryManager = checkNotNull(repositoryManager);
     this.container = checkNotNull(container);
@@ -394,17 +393,24 @@ public class DefaultNexusPluginManager
       }
     }
 
-    final List<String> exportedClassNames = new ArrayList<String>();
-    final List<RepositoryTypeDescriptor> repositoryTypes = new ArrayList<RepositoryTypeDescriptor>();
-    final List<StaticResource> staticResources = new ArrayList<StaticResource>();
+    final List<PlexusBeanModule> beanModules = new ArrayList<PlexusBeanModule>();
 
+    // Scan for Plexus XML components
+    final ClassSpace pluginSpace = new URLClassSpace(pluginRealm);
+    beanModules.add(new PlexusXmlBeanModule(pluginSpace, variables));
+
+    // Scan for annotated components
+    final ClassSpace annSpace = new URLClassSpace(pluginRealm, scanList.toArray(new URL[scanList.size()]));
+    beanModules.add(new PlexusAnnotatedBeanModule(annSpace, variables));
+
+    // Find static resources and expose as single resource bundle
+    final List<StaticResource> staticResources = findStaticResources(pluginSpace);
     final NexusResourceBundle resourceBundle = new NexusResourceBundle()
     {
       public List<StaticResource> getContributedResouces() {
         return staticResources;
       }
     };
-
     final Module resourceModule = new AbstractModule()
     {
       @Override
@@ -413,14 +419,7 @@ public class DefaultNexusPluginManager
       }
     };
 
-    final List<PlexusBeanModule> beanModules = new ArrayList<PlexusBeanModule>();
-
-    final ClassSpace pluginSpace = new URLClassSpace(pluginRealm);
-    beanModules.add(new PlexusXmlBeanModule(pluginSpace, variables));
-
-    final ClassSpace annSpace = new URLClassSpace(pluginRealm, scanList.toArray(new URL[scanList.size()]));
-    beanModules.add(new NexusAnnotatedBeanModule(annSpace, variables, exportedClassNames, repositoryTypes));
-
+    // Assemble plugin components and resources
     final List<Module> modules = new ArrayList<Module>();
     modules.add(resourceModule);
     modules.add(new PluginModule());
@@ -428,12 +427,15 @@ public class DefaultNexusPluginManager
 
     container.addPlexusInjector(beanModules, modules.toArray(new Module[modules.size()]));
 
-    for (final RepositoryTypeDescriptor r : repositoryTypes) {
-      repositoryTypeRegistry.registerRepositoryTypeDescriptors(r);
-    }
+    descriptor.setExportedClassnames(findExportedClassnames(annSpace));
+    // Registration now handled by RepositoryMediator...
+    // descriptor.setRepositoryTypes(repositoryTypes);
+    descriptor.setStaticResources(staticResources);
+  }
 
-    final Enumeration<URL> e = pluginSpace.findEntries("static/", null, true);
-    while (e.hasMoreElements()) {
+  private List<StaticResource> findStaticResources(final ClassSpace pluginSpace) {
+    final List<StaticResource> staticResources = new ArrayList<StaticResource>();
+    for (Enumeration<URL> e = pluginSpace.findEntries("static/", null, true); e.hasMoreElements();) {
       final URL url = e.nextElement();
       final String path = getPublishedPath(url);
       if (path != null) {
@@ -441,10 +443,23 @@ public class DefaultNexusPluginManager
             mimeSupport.guessMimeTypeFromPath(url.getPath())));
       }
     }
+    return staticResources;
+  }
 
-    descriptor.setExportedClassnames(exportedClassNames);
-    descriptor.setRepositoryTypes(repositoryTypes);
-    descriptor.setStaticResources(staticResources);
+  private static List<String> findExportedClassnames(final ClassSpace annSpace) {
+    final List<String> exportedClassNames = new ArrayList<String>();
+    for (Enumeration<URL> e = annSpace.findEntries(null, "*.class", true); e.hasMoreElements();) {
+      String path = e.nextElement().getPath();
+      int index = path.lastIndexOf("jar!/");
+      if (index > 0) {
+        path = path.substring(index + 5);
+      }
+      if (path.startsWith("/")) {
+        path = path.substring(1);
+      }
+      exportedClassNames.add(path.replace(".class", "").replaceAll("[/$]", "."));
+    }
+    return exportedClassNames;
   }
 
   private URL toURL(final PluginRepositoryArtifact artifact) {
@@ -522,5 +537,50 @@ public class DefaultNexusPluginManager
     pluginResponses.put(gav, result);
 
     eventBus.post(pluginEvent);
+  }
+
+  // ----------------------------------------------------------------------
+  // Implementation types
+  // ----------------------------------------------------------------------
+
+  /**
+   * Watches for Repository bindings and looks for @RepositoryType on the implementation's declared interfaces.
+   * (assumes implementation either uses a wildcard binding, or has Repository.class in its @Typed declaration)
+   */
+  @Named
+  private static final class RepositoryMediator
+      implements Mediator<Named, Repository, RepositoryTypeRegistry>
+  {
+    @Override
+    public void add(BeanEntry<Named, Repository> entry, RepositoryTypeRegistry registry) {
+      RepositoryTypeDescriptor rtd = findRepositoryType(entry);
+      if (rtd != null) {
+        registry.registerRepositoryTypeDescriptors(rtd);
+      }
+    }
+
+    @Override
+    public void remove(BeanEntry<Named, Repository> entry, RepositoryTypeRegistry registry) {
+      RepositoryTypeDescriptor rtd = findRepositoryType(entry);
+      if (rtd != null) {
+        registry.unregisterRepositoryTypeDescriptors(rtd);
+      }
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    private static RepositoryTypeDescriptor findRepositoryType(BeanEntry<Named, Repository> entry) {
+      Class<?> impl = entry.getImplementationClass();
+      if (impl != null) {
+        // Scan declared interfaces for @RepositoryType
+        for (Class role : impl.getInterfaces()) {
+          RepositoryType rt = ((Class<?>) role).getAnnotation(RepositoryType.class);
+          if (rt != null) {
+            String hint = entry.getKey().value();
+            return new RepositoryTypeDescriptor(role, hint, rt.pathPrefix(), rt.repositoryMaxInstanceCount());
+          }
+        }
+      }
+      return null;
+    }
   }
 }

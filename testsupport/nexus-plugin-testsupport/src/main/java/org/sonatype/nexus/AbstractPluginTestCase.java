@@ -16,14 +16,13 @@ package org.sonatype.nexus;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 
 import org.sonatype.guice.bean.reflect.ClassSpace;
 import org.sonatype.guice.bean.reflect.URLClassSpace;
-import org.sonatype.guice.nexus.binders.NexusAnnotatedBeanModule;
+import org.sonatype.guice.plexus.binders.PlexusAnnotatedBeanModule;
 import org.sonatype.guice.plexus.config.PlexusBeanModule;
-import org.sonatype.nexus.proxy.registry.RepositoryTypeDescriptor;
 
 import org.codehaus.plexus.DefaultPlexusContainer;
 import org.junit.Assert;
@@ -53,14 +52,10 @@ public abstract class AbstractPluginTestCase
         scanList.add(getTestFile(sourceDir).toURI().toURL());
       }
 
-      final List<String> exportedClassNames = new ArrayList<String>();
-      final List<RepositoryTypeDescriptor> repositoryTypes = new ArrayList<RepositoryTypeDescriptor>();
-
       final ClassSpace annSpace =
           new URLClassSpace(getContainer().getContainerRealm(), scanList.toArray(new URL[scanList.size()]));
-      final NexusAnnotatedBeanModule nexusPluginModule =
-          new NexusAnnotatedBeanModule(annSpace, new HashMap<String, String>(), exportedClassNames,
-              repositoryTypes);
+      final PlexusAnnotatedBeanModule nexusPluginModule =
+          new PlexusAnnotatedBeanModule(annSpace, Collections.EMPTY_MAP);
       final List<PlexusBeanModule> modules = Arrays.<PlexusBeanModule>asList(nexusPluginModule);
 
       // register new injector

@@ -24,7 +24,6 @@ import org.sonatype.nexus.plugins.repository.NexusPluginRepository;
 import org.sonatype.nexus.plugins.repository.NoSuchPluginRepositoryArtifactException;
 import org.sonatype.nexus.plugins.repository.PluginRepositoryArtifact;
 import org.sonatype.nexus.plugins.repository.PluginRepositoryManager;
-import org.sonatype.nexus.proxy.registry.RepositoryTypeRegistry;
 import org.sonatype.plugin.metadata.GAVCoordinate;
 import org.sonatype.plugins.model.PluginDependency;
 import org.sonatype.plugins.model.PluginMetadata;
@@ -50,9 +49,6 @@ public class DefaultNexusPluginManagerTest
 {
 
   @Mock
-  private RepositoryTypeRegistry repositoryTypeRegistry;
-
-  @Mock
   private EventBus eventBus;
 
   @Mock
@@ -69,9 +65,8 @@ public class DefaultNexusPluginManagerTest
       throws Exception
   {
     final DefaultNexusPluginManager underTest = new DefaultNexusPluginManager(
-        repositoryTypeRegistry, eventBus, pluginRepositoryManager,
-        new DefaultPlexusContainer(), mimeSupport, new HashMap<String, String>(),
-        Collections.<AbstractInterceptorModule>emptyList()
+        eventBus, pluginRepositoryManager, new DefaultPlexusContainer(), mimeSupport,
+        new HashMap<String, String>(), Collections.<AbstractInterceptorModule>emptyList()
     )
     {
       @Override
