@@ -29,7 +29,6 @@ import org.sonatype.nexus.proxy.repository.RepositoryKind;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 
 @Named("default")
-@Typed(SimpleRepository.class)
 @Description("Simple Repository")
 public class SimpleRepositoryImpl
     extends AbstractRepository
