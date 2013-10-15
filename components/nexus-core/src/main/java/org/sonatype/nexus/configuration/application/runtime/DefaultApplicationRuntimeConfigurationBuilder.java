@@ -21,7 +21,9 @@ import javax.inject.Singleton;
 import org.sonatype.configuration.ConfigurationException;
 import org.sonatype.configuration.validation.InvalidConfigurationException;
 import org.sonatype.guice.bean.locators.BeanLocator;
+import org.sonatype.inject.BeanEntry;
 import org.sonatype.nexus.logging.AbstractLoggingComponent;
+import org.sonatype.nexus.proxy.repository.GroupRepository;
 import org.sonatype.nexus.proxy.repository.Repository;
 
 import com.google.inject.Key;
@@ -48,9 +50,16 @@ public class DefaultApplicationRuntimeConfigurationBuilder
   @Override
   public Repository createRepository(Class<? extends Repository> type, String name) throws ConfigurationException {
     try {
-      final Provider<? extends Repository> rp = beanLocator.locate(Key.get(type, Names.named(name))).iterator().next()
-          .getProvider();
-      return rp.get();
+      Iterable<? extends BeanEntry<?, ? extends Repository>> itr = beanLocator.locate(Key.get(type, Names.named(name)));
+      // prefer non-group repositories over group repositories
+      if (!GroupRepository.class.isAssignableFrom(type)) {
+        for (final BeanEntry<?, ? extends Repository> entry : itr) {
+          if (!GroupRepository.class.isAssignableFrom(entry.getImplementationClass())) {
+            return entry.getValue();
+          }
+        }
+      }
+      return itr.iterator().next().getValue();
     }
     catch (Exception e) {
       throw new InvalidConfigurationException("Could not lookup a new instance of Repository!", e);
